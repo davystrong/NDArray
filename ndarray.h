@@ -18,7 +18,6 @@ struct NDArray
     int dataCount;
     NDARRAY_TYPE *data;
     int *refCount;
-    int _greatestTransposedAxis;
 };
 
 struct NDArrayPair

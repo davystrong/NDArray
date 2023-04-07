@@ -108,7 +108,6 @@ struct NDArray *NDArray_create(int *shape, int ndim, NDARRAY_TYPE *data)
 
     output->ndim = ndim;
     output->dataCount = dataCount;
-    output->_greatestTransposedAxis = -1;
 
     return output;
 }
@@ -187,14 +186,15 @@ int NDArray_reshape(struct NDArray *array, int *newShape, int newNDim)
     // Copy the shape, to avoid modifying the original
     int tempNewShape[newNDim];
     memcpy(tempNewShape, newShape, newNDim * sizeof(int));
+    newShape = tempNewShape;
 
-    // Calculate the value of an index
+    // Calculate the value of an undefined index
     int undefIndex = -1;
     int prod = 1;
     bool identical = array->ndim == newNDim;
     for (int i = 0; i < newNDim; i++)
     {
-        if (tempNewShape[i] == -1)
+        if (newShape[i] == -1)
         {
             if (undefIndex != -1)
             {
@@ -210,19 +210,19 @@ int NDArray_reshape(struct NDArray *array, int *newShape, int newNDim)
             // Check if the
             if (identical)
             {
-                identical = array->shape[i] == tempNewShape[i];
+                identical = array->shape[i] == newShape[i];
             }
-            prod *= tempNewShape[i];
+            prod *= newShape[i];
         }
     }
 
     if (undefIndex != -1)
     {
-        tempNewShape[undefIndex] = array->dataCount / prod;
+        newShape[undefIndex] = array->dataCount / prod;
     }
 
     // Check if the new shape is actually valid
-    if (shapeSize(tempNewShape, newNDim) != array->dataCount)
+    if (shapeSize(newShape, newNDim) != array->dataCount)
     {
         return 1;
     }
@@ -233,62 +233,63 @@ int NDArray_reshape(struct NDArray *array, int *newShape, int newNDim)
         return 0;
     }
 
-    // It may be possible to make this more efficient by ignoring edge cases like a shape of 1, etc.
-    // int i = 0;
-    // int j = 0;
-    // while (i < array->ndim && j < newNDim)
-    // {
-    //     if (array->shape[i] == tempNewShape[j])
-    //     {
-    //         i++;
-    //         j++;
-    //     }
-    //     else if (array->shape[i] == 1)
-    //     {
-    //         i++;
-    //     }
-    //     else if (tempNewShape[j] == 1)
-    //     {
-    //         j++;
-    //     }
-    //     else
-    //     {
-    //         DEBUG_PRINT("Making contiguous\n");
-    //         NDArray_makeContiguous(array);
-    //         break;
-    //     }
-    // }
-    int newGreatestTransposedAxis = 0;
-    for (int i = 0; i <= array->_greatestTransposedAxis; i++)
+    int indOld = array->ndim - 1;
+    int indNew = newNDim - 1;
+    int *newSteps = (int *)malloc(sizeof(int) * newNDim);
+    int oldShape[array->ndim];
+    memcpy(oldShape, array->shape, array->ndim * sizeof(int));
+    int oldSteps[array->ndim];
+    memcpy(oldSteps, array->steps, array->ndim * sizeof(int));
+    if (newShape[indNew] == 1)
     {
-
-        while (tempNewShape[newGreatestTransposedAxis] != array->shape[i] && tempNewShape[newGreatestTransposedAxis] == 1)
+        newSteps[indNew] = 1;
+        indNew--;
+    }
+    while (indOld >= 0 || indNew >= 0)
+    {
+        if (oldShape[indOld] == newShape[indNew])
         {
-            newGreatestTransposedAxis++;
+            newSteps[indNew] = oldSteps[indOld];
+            indOld--;
+            indNew--;
         }
-        if (tempNewShape[newGreatestTransposedAxis] != array->shape[i])
+        else if (oldShape[indOld] == 1)
+        {
+            indOld--;
+        }
+        else if (oldShape[indOld] % newShape[indNew] == 0)
+        {
+            newSteps[indNew] = oldSteps[indOld];
+            oldSteps[indOld] *= newShape[indNew];
+            oldShape[indOld] /= newShape[indNew];
+            indNew--;
+        }
+        else if (newShape[indNew] % oldShape[indOld] == 0 && oldSteps[indOld - 1] >= oldSteps[indOld])
+        {
+            // Implicitly (previous if) the value in newShape is larger and there are enough values
+            // in oldShape that this won't go out of bounds before it fails a check
+            oldShape[indOld - 1] *= oldShape[indOld];
+            indOld--;
+        }
+        else
         {
             DEBUG_PRINT("Making contiguous!\n");
             NDArray_makeContiguous(array);
-            newGreatestTransposedAxis = -1;
+            newSteps[newNDim - 1] = 1;
+            for (int i = newNDim - 1; i > 0; i--)
+            {
+                newSteps[i - 1] = newShape[i] * newSteps[i];
+            }
             break;
         }
-        newGreatestTransposedAxis++;
     }
-    array->_greatestTransposedAxis = newGreatestTransposedAxis;
 
-    // Calculate new shape and steps
+    // Set new shape and steps
     array->shape = (int *)realloc(array->shape, sizeof(int) * newNDim);
-    memcpy(array->shape, tempNewShape, sizeof(int) * newNDim);
+    memcpy(array->shape, newShape, sizeof(int) * newNDim);
 
     array->steps = (int *)realloc(array->steps, sizeof(int) * newNDim);
-    prod = 1;
-    array->steps[newNDim - 1] = prod;
-    for (int i = newNDim - 1; i > 0; i--)
-    {
-        prod *= tempNewShape[i];
-        array->steps[i - 1] = prod;
-    }
+    memcpy(array->steps, newSteps, sizeof(int) * newNDim);
 
     array->ndim = newNDim;
     return 0;
@@ -350,10 +351,6 @@ int NDArray_transpose(struct NDArray *array, int *newOrder)
 
     for (int i = 0; i < array->ndim; i++)
     {
-        if (i != newOrder[i] && i > array->_greatestTransposedAxis)
-        {
-            array->_greatestTransposedAxis = i;
-        }
         tempSteps[i] = array->steps[newOrder[i]];
         tempShape[i] = array->shape[newOrder[i]];
     }
@@ -424,33 +421,9 @@ int NDArray_makeContiguous(struct NDArray *array)
     array->refCount = (int *)malloc(sizeof(int));
     *array->refCount = 1;
 
-    array->_greatestTransposedAxis = -1;
     qsort(array->steps, array->ndim, sizeof(int), compare);
     return 0;
 }
-
-// NDARRAY_TYPE *NDArray_nextPointer(struct NDArray *array, NDARRAY_TYPE *pointer)
-// {
-//     int offset = pointer - array->data;
-//     if (offset == array->dataCount - 1)
-//     {
-//         return 0;
-//     }
-
-//     for (int i = array->ndim - 1; i >= 0; i--)
-//     {
-//         offset += array->steps[i];
-//         if (offset >= array->dataCount)
-//         {
-//             offset -= array->steps[i] * array->shape[i];
-//         }
-//         else
-//         {
-//             return array->data + offset;
-//         }
-//     }
-//     return 0;
-// }
 
 // Assumes pointer is in array. Currently, this won't work with steps of 0
 void NDArray_getIndex(struct NDArray *array, NDARRAY_TYPE *pointer, int *index)
@@ -609,7 +582,6 @@ struct NDArray *NDArray_broadcastTo(struct NDArray *array, int *shape)
 
     result->ndim = array->ndim;
     result->dataCount = array->dataCount;
-    result->_greatestTransposedAxis = array->_greatestTransposedAxis;
     return result;
 }
 
@@ -751,7 +723,6 @@ struct NDArray *NDArray_copy(struct NDArray *array)
     ++*output->refCount;
     output->ndim = array->ndim;
     output->dataCount = array->dataCount;
-    output->_greatestTransposedAxis = array->_greatestTransposedAxis;
 
     output->steps = (int *)malloc(sizeof(int) * array->ndim);
     output->shape = (int *)malloc(sizeof(int) * array->ndim);
@@ -767,7 +738,6 @@ struct NDArray *NDArray_clone(struct NDArray *array)
 
     output->ndim = array->ndim;
     output->dataCount = array->dataCount;
-    output->_greatestTransposedAxis = array->_greatestTransposedAxis;
 
     output->data = (NDARRAY_TYPE *)malloc(sizeof(NDARRAY_TYPE) * array->dataCount);
     memcpy(output->data, array->data, sizeof(NDARRAY_TYPE) * array->dataCount);
