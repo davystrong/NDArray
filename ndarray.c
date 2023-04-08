@@ -247,19 +247,14 @@ int NDArray_reshape(struct NDArray *array, int *newShape, int newNDim)
     }
     while (indNew >= 0)
     {
-        if (oldShape[indOld] == 1)
-        {
-            // This condition is still required to pass discontinuities correctly
-            indOld--;
-        }
-        else if (oldShape[indOld] % newShape[indNew] == 0)
+        if (oldShape[indOld] % newShape[indNew] == 0)
         {
             newSteps[indNew] = oldSteps[indOld];
             oldSteps[indOld] *= newShape[indNew];
             oldShape[indOld] /= newShape[indNew];
             indNew--;
         }
-        else if (oldSteps[indOld - 1] == oldShape[indOld] * oldSteps[indOld])
+        else if (oldShape[indOld] == 1 || oldSteps[indOld - 1] == oldShape[indOld] * oldSteps[indOld])
         {
             oldShape[indOld - 1] *= oldShape[indOld];
             indOld--;
