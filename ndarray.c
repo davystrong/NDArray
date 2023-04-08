@@ -235,7 +235,7 @@ int NDArray_reshape(struct NDArray *array, int *newShape, int newNDim)
 
     int indOld = array->ndim - 1;
     int indNew = newNDim - 1;
-    int *newSteps = (int *)malloc(sizeof(int) * newNDim);
+    int newSteps[newNDim];
     int oldShape[array->ndim];
     memcpy(oldShape, array->shape, array->ndim * sizeof(int));
     int oldSteps[array->ndim];
